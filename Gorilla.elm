@@ -22,7 +22,9 @@ delta : Signal Time
 delta = inSeconds <~ fps 60
 
 input : Signal Input
-input = sampleOn delta <| Input <~ space ~ (Signal.map .x arrows)
+input = sampleOn delta <| Input
+                       <~ space
+                        ~ (Signal.map .x arrows)
 
 {-- **** Model **** --}
 
@@ -67,7 +69,7 @@ type alias Game =
     , playTo  : Int
     , sun     : Sun 
     , seed    : Int
-    , keyDown : Bool }
+    , keyDown : Int }
 
 wind : Wind
 wind = { direction=Left, strength=0.5 }
@@ -138,7 +140,7 @@ player x y name = { width=playerWidth, height=playerHeight, x=x, y=y, score=0, n
 defaultGame : Int -> Game
 defaultGame seedInt = 
     let 
-        seed = initialSeed seedInt
+        seed = initialSeed (Debug.watch "seedInt" seedInt)
         (skyline, seed1) = generateSkyline seed
         (random12, seed2) = generate (int 1 2) seed1
         (random23, seed3) = generate (int 2 3) seed2
@@ -157,7 +159,7 @@ defaultGame seedInt =
     , playTo  = 3
     , sun     = { x=0, y=halfHeight-40, smiling=True }
     , seed    = seedInt
-    , keyDown = False
+    , keyDown = 0
     }
 
 
@@ -170,11 +172,12 @@ stepGame {space, arrows} game =
     let 
         next = defaultGame (game.seed + 1)
         prev = defaultGame (game.seed - 1)
+        a = Debug.watch "arrows" arrows
     in
-        if  | arrows ==  1  && not game.keyDown -> { next | keyDown <- True  }
-            | arrows == -1  && not game.keyDown -> { prev | keyDown <- True  }
-            | arrows ==  0  && game.keyDown     -> { game | keyDown <- False }
-            | otherwise                         -> game
+        if  | arrows ==  1 && not (game.keyDown ==  1) -> { next | keyDown <-  1 }
+            | arrows == -1 && not (game.keyDown == -1) -> { prev | keyDown <- -1 }
+            | arrows ==  0 && not (game.keyDown ==  0) -> { game | keyDown <-  0 }
+            | otherwise                                ->   game
         
 
 gameState : Signal Game
