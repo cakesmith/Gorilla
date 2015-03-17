@@ -1,9 +1,9 @@
 -- Imports
 import Time (..)
 import Signal (..)
-import List (..)
+import List(..)
 import List
-import Array (toList, fromList, push)
+import Array (get, fromList)
 import Random (..)
 import Signal
 import Color (..)
@@ -12,26 +12,26 @@ import Graphics.Element (..)
 import Graphics.Collage (..)
 import Keyboard (..)
 import Debug
+import Maybe
 
 {-- **** Inputs **** --}
 
-type alias Input = { keys:List KeyCode }
+type alias Input = { space:Bool, arrows: Int }
 
 delta : Signal Time
 delta = inSeconds <~ fps 60
 
 input : Signal Input
-input = sampleOn delta <| Input <~ keysDown
+input = sampleOn delta <| Input <~ space ~ (Signal.map .x arrows)
 
 {-- **** Model **** --}
 
 (gameWidth, gameHeight) = (640, 350)
 (halfWidth, halfHeight) = (gameWidth/2, gameHeight/2)
+(playerWidth, playerHeight) = (28, 29)
 
 (minBuildingWidth, maxBuildingWidth) = (30, 120)
 (minBuildingHeight, maxBuildingHeight) = (75, 200)
-
-gap = 2
 
 type State = Intro 
             | Pause
@@ -40,7 +40,7 @@ type State = Intro
 
 type alias Object a = { a | x:Float, y:Float }
 
-type alias Player = Object { score: Int, name:String }
+type alias Player = Object { height:Float, width:Float, score: Int, name:String }
 
 type alias Banana = Object { vx:Float, vy:Float, displayed: Bool, rotation:Float }
 
@@ -66,7 +66,8 @@ type alias Game =
     , gravity : Float
     , playTo  : Int
     , sun     : Sun 
-    , seed    : Seed }
+    , seed    : Int
+    , keyDown : Bool }
 
 wind : Wind
 wind = { direction=Left, strength=0.5 }
@@ -79,9 +80,11 @@ buildingWidths : List Float -> Seed -> (List Float, Seed)
 buildingWidths widths seed = 
     let 
         total = foldr (+) 0 widths
-        (next, seed') = generate (float minBuildingWidth maxBuildingWidth) seed
+        (this, seed') = generate (float minBuildingWidth maxBuildingWidth) seed
     in
-        if total + next > gameWidth then (,) (gameWidth-total :: widths) seed' else buildingWidths (next :: widths) seed'
+        if total + this > gameWidth 
+            then (,) widths seed' 
+            else buildingWidths (append widths (this :: [])) seed'
 
 -- Create a list of building heights
 -- Pass this a seed, the number of buildings, and an empty list
@@ -90,56 +93,71 @@ buildingHeights numBuildings heights seed =
     let
         (height, seed') = generate (float minBuildingHeight maxBuildingHeight) seed
     in
-        if numBuildings == 0 then (heights, seed') else buildingHeights (numBuildings - 1) (height :: heights) seed'
-
+        if numBuildings == 0 
+            then (,) heights seed'
+            else buildingHeights (numBuildings - 1) (append heights (height :: [])) seed'
 
 -- Calculate x positions of buildings in the skyline
-xPositions : List { a | width:Float } -> List Float -> List Float
-xPositions skyline positions =
+xPositions : List { a | width:Float } -> List Float
+xPositions skyline =
     let 
-        total = gameWidth - foldr (\building next -> building.width + next) 0 skyline
+        gap = (gameWidth - foldr (\cur prev -> prev + cur.width) 0 skyline) / (toFloat ((length skyline) + 1))
+        widths = List.map .width skyline
+        leftEdges = List.scanl (\a b -> a + b + gap) (-halfWidth + gap) widths
     in
-        if length skyline == 0 then positions else
-            -- Have to convert skyline to an Array to push the new position to the end of the list
-            -- and then convert back to a List to return
-            xPositions (tail skyline)
-            (toList 
-                <| push ((halfWidth - (.width (head skyline))/2) - total) 
-                (fromList positions))
+      List.map2 (+) leftEdges (List.map (\n -> n/2) widths)
+
             
 yPositions : List { a | height:Float } -> List Float
 yPositions skyline =
     List.map (\n -> (n.height/2) - halfHeight + 20) skyline
+
+topOf : Int -> Skyline -> Maybe (Float, Float)
+topOf i skyline =
+    let building = get i (fromList skyline)
+    in
+        case building of 
+            Nothing -> Nothing
+            Just building -> Just (building.x, building.y + building.height/2)
+
+    
 
 generateSkyline : Seed -> (Skyline, Seed)
 generateSkyline seed = 
     let (widths, seed') = buildingWidths [] seed
         (heights, seed'') = buildingHeights (List.length widths) [] seed'
         buildings = List.map2 (\w h -> {height=h, width=w}) widths heights
-        xPos = List.map2 (\x building -> {building | x=x}) (xPositions buildings []) buildings
+        xPos = List.map2 (\x building -> {building | x=x}) (xPositions buildings) buildings
     in
        (,) (List.map2 (\y building -> {building | y=y}) (yPositions buildings) xPos) seed''
 
 player : Float -> Float -> String -> Player
-player x y name = { x=x, y=y, score=0, name=name }
+player x y name = { width=playerWidth, height=playerHeight, x=x, y=y, score=0, name=name }
 
---positionPlayerLeft : Skyline -> Seed -> (Seed, Int, Int)
 
-defaultGame : Game
-defaultGame = 
-    let seed = initialSeed 42
-        (skyline, seed') = generateSkyline seed
+defaultGame : Int -> Game
+defaultGame seedInt = 
+    let 
+        seed = initialSeed seedInt
+        (skyline, seed1) = generateSkyline seed
+        (random12, seed2) = generate (int 1 2) seed1
+        (random23, seed3) = generate (int 2 3) seed2
+
+        (p1x, p1y) = Maybe.withDefault (0,0) (topOf random12 skyline)
+        (p2x, p2y) = Maybe.withDefault (0,0) (topOf ((length skyline) - random23) skyline)
+
     in
     { state   = Pause
-    , player1 = player -60 0 "Player 1"
-    , player2 = player 60 0 "Player 2"
-    , skyline = List.map (\building -> {building | width <- building.width - gap}) skyline
+    , player1 = player p1x (p1y + 1 + playerHeight/2) "Player 1"
+    , player2 = player p2x (p2y + 1 + playerHeight/2) "Player 2"
+    , skyline = skyline
     , wind    = wind
     , banana  = { x=0, y=0, vx=0, vy=0, displayed=False, rotation=0 }
     , gravity = 9.3
     , playTo  = 3
     , sun     = { x=0, y=halfHeight-40, smiling=True }
-    , seed    = seed
+    , seed    = seedInt
+    , keyDown = False
     }
 
 
@@ -148,13 +166,19 @@ defaultGame =
 {-- **** Update **** --}
 
 stepGame : Input -> Game -> Game
-stepGame input game =
-    Debug.watch "Game" game
+stepGame {space, arrows} game =
+    let 
+        next = defaultGame (game.seed + 1)
+        prev = defaultGame (game.seed - 1)
+    in
+        if  | arrows ==  1  && not game.keyDown -> { next | keyDown <- True  }
+            | arrows == -1  && not game.keyDown -> { prev | keyDown <- True  }
+            | arrows ==  0  && game.keyDown     -> { game | keyDown <- False }
+            | otherwise                         -> game
+        
 
 gameState : Signal Game
-gameState = foldp stepGame defaultGame input
-
-
+gameState = foldp stepGame (defaultGame 42) input
 
 
 {-- **** View **** --}
@@ -177,7 +201,7 @@ displaySun sun =
 
 displayPlayer : Player -> Form
 displayPlayer player =
-   move (player.x, player.y) <| toForm (image 28 29 "images/gorilla.png")
+   move (player.x, player.y) <| toForm (image playerWidth playerHeight "images/gorilla.png")
 
 gameCollage : (Int, Int) -> Game -> Element
 gameCollage (w,h) game =
@@ -197,4 +221,5 @@ gameCollage (w,h) game =
 display : (Int, Int) -> Game -> Element
 display (w,h) game = 
     container w h middle <| gameCollage (w,h) game
+
 main = Signal.map2 display Window.dimensions gameState
