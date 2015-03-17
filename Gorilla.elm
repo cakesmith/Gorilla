@@ -140,7 +140,7 @@ player x y name = { width=playerWidth, height=playerHeight, x=x, y=y, score=0, n
 defaultGame : Int -> Game
 defaultGame seedInt = 
     let 
-        seed = initialSeed (Debug.watch "seedInt" seedInt)
+        seed = initialSeed seedInt
         (skyline, seed1) = generateSkyline seed
         (random12, seed2) = generate (int 1 2) seed1
         (random23, seed3) = generate (int 2 3) seed2
@@ -169,7 +169,8 @@ defaultGame seedInt =
 
 stepGame : Input -> Game -> Game
 stepGame {space, arrows} game =
-    let 
+    let
+        s = Debug.watch "seed" game.seed
         next = defaultGame (game.seed + 1)
         prev = defaultGame (game.seed - 1)
         a = Debug.watch "arrows" arrows
